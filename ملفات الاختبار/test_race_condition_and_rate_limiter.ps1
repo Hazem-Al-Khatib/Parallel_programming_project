@@ -37,7 +37,7 @@ for ($i = 1; $i -le 20; $i++) {
 }
 
 Write-Host "Processing requests, please wait..." -ForegroundColor Yellow
-Get-Job | Wait-Job | Out-Null
+Get-Job | Out-Null
 
 Write-Host "`n==========================================================" -ForegroundColor Green
 Write-Host "TEST RESULTS RECEIVED FROM LARAVEL CONVERSIONS:" -ForegroundColor Green

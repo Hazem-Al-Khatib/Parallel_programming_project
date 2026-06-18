@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\OrderController;
 use App\Jobs\ProcessDailySalesBatch;
+use App\Http\Controllers\ProductController;
 
 Route::get('/', function () {
     return view('welcome');
@@ -15,6 +16,10 @@ Route::middleware(['load.balancer'])->group(function () {
         \App\Jobs\ProcessDailySalesBatch::dispatch();
         return "تم إطلاق المهام بالتوازي.. راقب السجلات!";
     });
+    
+Route::get('/products', [ProductController::class, 'index']);
+
+Route::post('/purchase-distributed-lock', [OrderController::class, 'purchaseWithDistributedLock']);
     
 });
 
