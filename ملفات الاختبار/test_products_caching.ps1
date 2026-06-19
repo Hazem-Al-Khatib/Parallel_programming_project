@@ -1,4 +1,7 @@
-# Clear the terminal screen for a clean, professional output
+# ====================================================================
+# TESTING PRODUCT LISTING CACHING (CACHE-ASIDE PATTERN)
+# ====================================================================
+Get-Job | Remove-Job -Force
 Clear-Host
 
 # Base URL for your Laravel product route
@@ -14,24 +17,36 @@ Write-Host ""
 # ----------------------------------------------------------------
 Write-Host "[1] Launching FIRST request (Forcing Cache MISS)..." -ForegroundColor Yellow
 
-# Appending ?clear_cache=true tells our ProductController to drop the existing Redis RAM key first
 $URL_First = "$BaseURL`?clear_cache=true"
-
 $Stopwatch1 = [System.Diagnostics.Stopwatch]::StartNew()
-$Response1 = Invoke-RestMethod -Uri $URL_First -Method Get
-$Stopwatch1.Stop()
 
-# Display the actual products fetched
-Write-Host "--- DISPLAYING PRODUCTS RECEIVED ---" -ForegroundColor Gray
-foreach ($product in $Response1.data) {
-    Write-Host "• ID: $($product.id) | Name: $($product.name) | Price: $($product.price)$" -ForegroundColor White
+try {
+    # جلب البيانات مع تخطي فحص المتصفح الأمني
+    $WebResponse1 = Invoke-WebRequest -Uri $URL_First -Method Get -UseBasicParsing -TimeoutSec 10
+    $Stopwatch1.Stop()
+
+    $Response1 = $WebResponse1.Content | ConvertFrom-Json
+
+    # عرض المنتجات
+    Write-Host "--- DISPLAYING PRODUCTS RECEIVED ---" -ForegroundColor Gray
+    foreach ($product in $Response1.data) {
+        Write-Host "• ID: $($product.id) | Name: $($product.name) | Price: $($product.price)$" -ForegroundColor White
+    }
+    Write-Host "------------------------------------" -ForegroundColor Gray
+    Write-Host "--> Source: $($Response1.source)" -ForegroundColor Red
+    Write-Host "--> Client Stopwatch Time: $($Stopwatch1.Elapsed.TotalMilliseconds) ms" -ForegroundColor Magenta
+
+    # قراءة الهيدر القادم من الميدل وير بأمان
+    $ServerTime1 = $WebResponse1.Headers['X-Server-Execution-Time']
+    if ($null -eq $ServerTime1) { $ServerTime1 = "Not Found (Check Middleware Registration)" }
+    Write-Host "--> Net Server Execution Time (AOP): $ServerTime1" -ForegroundColor Cyan
+
+} catch {
+    Write-Host "[ERROR IN FIRST REQUEST]: $_" -ForegroundColor Red
 }
-Write-Host "------------------------------------" -ForegroundColor Gray
-Write-Host "--> Source: $($Response1.source)" -ForegroundColor Red
-Write-Host "--> Execution Time: $($Stopwatch1.Elapsed.TotalMilliseconds) ms" -ForegroundColor Magenta
-Write-Host ""
 
-# Wait 2 seconds to visually separate the two tests in the console
+Write-Host ""
+# الانتظار لمدة ثانيتين للفصل البصري
 Start-Sleep -Seconds 2
 
 # ----------------------------------------------------------------
@@ -39,23 +54,35 @@ Start-Sleep -Seconds 2
 # ----------------------------------------------------------------
 Write-Host "[2] Launching SECOND request (Expecting Cache HIT)..." -ForegroundColor Yellow
 
-# Standard URL without parameters so it uses the cached data built by the first request
 $URL_Second = $BaseURL
-
 $Stopwatch2 = [System.Diagnostics.Stopwatch]::StartNew()
-$Response2 = Invoke-RestMethod -Uri $URL_Second -Method Get
-$Stopwatch2.Stop()
 
-# Display the actual products fetched (should be identical data)
-Write-Host "--- DISPLAYING PRODUCTS RECEIVED ---" -ForegroundColor Gray
-foreach ($product in $Response2.data) {
-    Write-Host "• ID: $($product.id) | Name: $($product.name) | Price: $($product.price)$" -ForegroundColor White
+try {
+    # الطلب الثاني مع التخطي الأمني المباشر
+    $WebResponse2 = Invoke-WebRequest -Uri $URL_Second -Method Get -UseBasicParsing -TimeoutSec 10
+    $Stopwatch2.Stop()
+
+    $Response2 = $WebResponse2.Content | ConvertFrom-Json
+
+    # عرض المنتجات
+    Write-Host "--- DISPLAYING PRODUCTS RECEIVED ---" -ForegroundColor Gray
+    foreach ($product in $Response2.data) {
+        Write-Host "• ID: $($product.id) | Name: $($product.name) | Price: $($product.price)$" -ForegroundColor White
+    }
+    Write-Host "------------------------------------" -ForegroundColor Gray
+    Write-Host "--> Source: $($Response2.source)" -ForegroundColor Green
+    Write-Host "--> Client Stopwatch Time: $($Stopwatch2.Elapsed.TotalMilliseconds) ms" -ForegroundColor Magenta
+
+    # قراءة الهيدر للطلب الثاني
+    $ServerTime2 = $WebResponse2.Headers['X-Server-Execution-Time']
+    if ($null -eq $ServerTime2) { $ServerTime2 = "Not Found (Check Middleware Registration)" }
+    Write-Host "--> Net Server Execution Time (AOP): $ServerTime2" -ForegroundColor Cyan
+
+} catch {
+    Write-Host "[ERROR IN SECOND REQUEST]: $_" -ForegroundColor Red
 }
-Write-Host "------------------------------------" -ForegroundColor Gray
-Write-Host "--> Source: $($Response2.source)" -ForegroundColor Green
-Write-Host "--> Execution Time: $($Stopwatch2.Elapsed.TotalMilliseconds) ms" -ForegroundColor Magenta
-Write-Host ""
 
+Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host " Notice the massive drop in Execution Time!                " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
