@@ -1,11 +1,6 @@
-# ====================================================================
-# LOAD DISTRIBUTION AND HORIZONTAL SCALING TESTING SCRIPT
-# ====================================================================
-
 Get-Job | Remove-Job -Force
 Clear-Host
 
-# Define our two parallel server instances (The Pool)
 $servers = @("http://127.0.0.1:8000/buy", "http://127.0.0.1:8001/buy")
 
 $requestScript = {
@@ -26,9 +21,7 @@ Write-Host "Simulating Load Balancer distributing 20 requests..." -ForegroundCol
 Write-Host "Pool: [Port 8000] and [Port 8001]" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-# Fire 20 parallel requests alternating between Server 8000 and Server 8001
 for ($i = 1; $i -le 20; $i++) {
-    # Round-Robin selection: alternate between index 0 and 1
     $targetServer = $servers[$i % 2]
     Start-Job -ScriptBlock $requestScript -ArgumentList $targetServer, $i | Out-Null
 }
@@ -40,7 +33,6 @@ Write-Host "`n==========================================================" -Foreg
 Write-Host "CLUSTER DISTRIBUTION RESULTS:" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 
-# Print results with server identification
 Get-Job | Receive-Job | ForEach-Object {
     if ($_ -match "SUCCESS") {
         Write-Host $_ -ForegroundColor Green

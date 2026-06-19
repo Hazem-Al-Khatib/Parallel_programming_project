@@ -12,8 +12,9 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->validateCsrfTokens(except: [
-            'purchase-distributed-lock', // استثناء مسار القفل الموزع من فحص الـ CSRF
+            'purchase-distributed-lock',
             '/buy', 
+            'purchase-without-lock',
         ]);
 
         $middleware->alias([
@@ -21,7 +22,6 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
     })->create();
 
 

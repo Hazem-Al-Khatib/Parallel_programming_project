@@ -8,7 +8,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Cache; // استدعاء واجهة الكاش
+use Illuminate\Support\Facades\Cache;
 
 class OrderController extends Controller
 {
@@ -19,8 +19,6 @@ class OrderController extends Controller
         
         $redisStockKey = "product_stock_{$productId}";
 
-        // 1. خط الدفاع الأول (Cache Check): فحص الستوك من الـ RAM (Redis) مباشرة
-        // إذا كان الستوك مخزن في كاش Redis وقيمته أقل من الكمية المطلوبة، ارفض فوراً!
         if (Cache::has($redisStockKey)) {
             $cachedStock = (int) Cache::get($redisStockKey);
             if ($cachedStock < $quantityToBuy) {
@@ -36,16 +34,13 @@ class OrderController extends Controller
             }
         }
 
-        // 2. خط الدفاع الثاني: إذا مر الطلب من الكاش أو لم يكن الكاش موجوداً بعد، يدخل للـ DB
         return DB::transaction(function () use ($productId, $quantityToBuy, $redisStockKey) {
             
-            // القفل التشاؤمي للحماية النهائية من الـ Race Condition
-            $product = Product::where('id', $productId)->lockForUpdate()->first();
+        $product = Product::where('id', $productId)->lockForUpdate()->first();
 
             if (!$product || $product->stock < $quantityToBuy) {
                 $currentStock = $product ? $product->stock : 'Product Not Found';
                 
-                // تحديث الكاش بالـ 0 لكي يرفض Redis الطلبات القادمة فوراً
                 if ($product) {
                     Cache::put($redisStockKey, $product->stock, 60);
                 }
@@ -61,15 +56,11 @@ class OrderController extends Controller
                 ], 400);
             }
 
-            // الخصم الحقيقي من قاعدة البيانات
             $product->stock -= $quantityToBuy;
             $product->save();
 
-            // 3. تحديث الكاش (Cache Update): مزامنة الـ Redis فوراً بالقيمة الجديدة للستوك
-            // نضعها بصلاحية 60 ثانية (تتحدث مع كل عملية شراء ناجحة)
             Cache::put($redisStockKey, $product->stock, 60);
 
-            // إنشاء الطلب والعناصر
             $order = Order::create([
                 'user_id' => 1, 
                 'total_price' => $product->price * $quantityToBuy,
@@ -96,52 +87,38 @@ class OrderController extends Controller
 
 
     public function purchaseWithDistributedLock(Request $request)
-{
-    $productId = $request->input('product_id', 1);
+        {
+            $productId = $request->input('product_id', 1);
     
-    // 🔐 تشييد القفل الموزع (صلاحية 5 ثوانٍ كافية جداً لعملية شراء)
-    $lock = Cache::lock('lock:product:' . $productId, 5);
+            $lock = Cache::lock('lock:product:' . $productId, 5);
 
-    // محاولة الاستحواذ على القفل
-    if ($lock->get()) {
-        try {
-            // --------------------------------------------------------
-            // 🚀 المنطقة المحمية بالكامل (Critical Section)
-            // --------------------------------------------------------
+            if ($lock->get()) {
+                try {
+                    $purchaseResult = DB::transaction(function () use ($productId, &$remainingStock) {
+                        
+                        $product = Product::where('id', $productId)->lockForUpdate()->first();
 
-            // بدء المعاملة لضمان عزل البيانات وحمايتها
-            $purchaseResult = DB::transaction(function () use ($productId, &$remainingStock) {
-                
-                // جلب المنتج فريش من الـ DB مع قفل تحديث لحمايته داخل الـ Transaction
-                $product = Product::where('id', $productId)->lockForUpdate()->first();
+                        if (!$product || $product->stock <= 0) {
+                            return false; 
+                        }
 
-                // التحقق الحقيقي والدقيق من المخزون
-                if (!$product || $product->stock <= 0) {
-                    return false; // فشل الطلب لعدم وجود مخزون
-                }
+                        $product->decrement('stock', 1);
+                        
+                        $product->refresh();
+                        $remainingStock = $product->stock;
 
-                // خصم المخزون بأمان
-                $product->decrement('stock', 1);
-                
-                // تحديث بيانات الكائن في ذاكرة PHP ليعكس القيمة الحقيقية في قاعدة البيانات فوراً
-                $product->refresh();
-                $remainingStock = $product->stock;
+                        $totalPrice = $product->price * 1;
+                        Order::create([
+                            'product_id'  => $product->id,
+                            'user_id'     => 1,             
+                            'total_price' => $totalPrice,   
+                            'status'      => 'completed'
+                        ]);
 
-                // حساب الإجمالي وإنشاء الطلب
-                $totalPrice = $product->price * 1;
-                Order::create([
-                    'product_id'  => $product->id,
-                    'user_id'     => 1,             
-                    'total_price' => $totalPrice,   
-                    'status'      => 'completed'
-                ]);
-
-                return true; // نجحت العملية
+                    return true; 
             });
 
-            // إذا فشل الفحص داخل الـ Transaction (المخزون نفد)
             if (!$purchaseResult) {
-                // نضع 0 في الكاش فوراً لمنع الطلبات التالية قبل دخولها لقاعدة البيانات
                 Cache::put('product_stock_' . $productId, 0, 86400);
 
                 return response()->json([
@@ -150,7 +127,6 @@ class OrderController extends Controller
                 ], 422);
             }
 
-            // ⚡ مزامنة الـ Redis كاش بالقيمة الحقيقية الصحيحة بنسبة 100%
             Cache::put('product_stock_' . $productId, $remainingStock, 86400);
 
             return response()->json([
@@ -160,15 +136,43 @@ class OrderController extends Controller
             ]);
 
         } finally {
-            // 🔓 تحرير القفل فوراً للسماح بالطلب التالي بالدخول
             $lock->release();
         }
-    }
-
-    // ❌ إذا كانت البوابة مغلقة (طلب متزامن تماماً في نفس الميكروثانية)
-    return response()->json([
+        }
+        return response()->json([
         'status' => 'rejected',
         'message' => 'System Busy / Request Blocked by Redis Distributed Lock'
-    ], 423);
-}
+         ], 423);
+        }
+
+
+
+    public function purchaseWithoutLock(Request $request)
+        {
+            $productId = $request->input('product_id', 1);
+            $product = Product::find($productId);
+
+            if (!$product || $product->stock <= 0) {
+                return response()->json([
+                'status' => 'rejected',
+                'message' => 'Out of stock / Request Blocked (Traditional Check)'
+                    ],
+                 422);
+                 }
+
+                $product->decrement('stock', 1);
+
+                Order::create([
+                    'product_id'  => $product->id,
+                    'user_id'     => 1,             
+                    'total_price' => $product->price,   
+                    'status'      => 'completed'
+                ]);
+
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Purchase processed WITHOUT LOCK!',
+                    'remaining_stock' => $product->stock - 1
+                ]);
+        }
 }

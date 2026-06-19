@@ -21,6 +21,7 @@ Route::get('/products', [ProductController::class, 'index']);
 
 Route::post('/purchase-distributed-lock', [OrderController::class, 'purchaseWithDistributedLock']);
     
+Route::post('/purchase-without-lock', [OrderController::class, 'purchaseWithoutLock']);
 });
 
 
