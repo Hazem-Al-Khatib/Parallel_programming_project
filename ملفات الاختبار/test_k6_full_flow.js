@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 
-const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:8080';
+const BASE_URL = __ENV.BASE_URL || 'http://127.0.0.1:8000';
 const REGIONS = ['Riyadh', 'Jeddah', 'Dammam', 'Abha', 'Tabuk'];
 
 export const options = {

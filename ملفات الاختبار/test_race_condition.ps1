@@ -31,18 +31,21 @@ for ($i = 1; $i -le 2; $i++) {
     Start-Job -ScriptBlock $requestScript -ArgumentList $url | Out-Null
 }
 
-Write-Host "Processing, waiting for both jobs to finish..." -ForegroundColor Yellow
+Write-Host "Waiting for responses from server..." -ForegroundColor Yellow
+
 Get-Job | Wait-Job | Out-Null
 
-Start-Sleep -Seconds 1
+Write-Host "`n==========================================================" -ForegroundColor Cyan
+Write-Host "FINAL TRAFFIC RESULTS:" -ForegroundColor Cyan
+Write-Host "==========================================================" -ForegroundColor Cyan
 
 Get-Job | ForEach-Object {
     $result = $_ | Receive-Job
     if ($result) {
-        if ($result -match "SUCCESS") {
-            Write-Host $result -ForegroundColor Green
+        if ($result -match "SUCCESS" -or $result -match "Purchase complete") {
+            Write-Host $result -ForegroundColor Green 
         } else {
-            Write-Host $result -ForegroundColor Red
+            Write-Host $result -ForegroundColor Red 
         }
     }
 }

@@ -12,12 +12,19 @@ use Illuminate\Support\Facades\Cache;
 
 class OrderController extends Controller
 {
+
     public function placeOrder(Request $request)
     {
+        $user = \App\Models\User::first();
+        if (!$user) {
+            return response()->json(['message' => 'No user found'], 500);
+        }
+
         $productId = (int) $request->input('product_id', 1);
-        $quantityToBuy = (int) $request->input('quantity', 1);
+        $quantity = (int) $request->input('quantity', 1);
         
         $redisStockKey = "product_stock_{$productId}";
+        $order = $this->orderService->placeOrder($user, $productId, $quantity);
 
         if (Cache::has($redisStockKey)) {
             $cachedStock = (int) Cache::get($redisStockKey);
@@ -33,10 +40,18 @@ class OrderController extends Controller
                 ], 400);
             }
         }
+        
+        try {
+            $user = \App\Models\User::first();
+            $order = $this->orderService->placeOrder($user, $productId, $quantity);
+            return response()->json(['message' => 'Success', 'data' => $order], 200);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 400);
+        }
 
         return DB::transaction(function () use ($productId, $quantityToBuy, $redisStockKey) {
             
-        $product = Product::where('id', $productId)->lockForUpdate()->first();
+            $product = Product::where('id', $productId)->lockForUpdate()->first();
 
             if (!$product || $product->stock < $quantityToBuy) {
                 $currentStock = $product ? $product->stock : 'Product Not Found';
@@ -84,95 +99,94 @@ class OrderController extends Controller
         });
     }
 
-
-
+    /**
+     */
     public function purchaseWithDistributedLock(Request $request)
-        {
-            $productId = $request->input('product_id', 1);
-    
-            $lock = Cache::lock('lock:product:' . $productId, 5);
+    {
+        $productId = $request->input('product_id', 1);
+        $lock = Cache::lock('lock:product:' . $productId, 5);
+        
+        $remainingStock = 0;
 
-            if ($lock->get()) {
-                try {
-                    $purchaseResult = DB::transaction(function () use ($productId, &$remainingStock) {
-                        
-                        $product = Product::where('id', $productId)->lockForUpdate()->first();
+        if ($lock->get()) {
+            try {
+                $purchaseResult = DB::transaction(function () use ($productId, &$remainingStock) {
+                    
+                    $product = Product::where('id', $productId)->lockForUpdate()->first();
 
-                        if (!$product || $product->stock <= 0) {
-                            return false; 
-                        }
+                    if (!$product || $product->stock <= 0) {
+                        return false; 
+                    }
 
-                        $product->decrement('stock', 1);
-                        
-                        $product->refresh();
-                        $remainingStock = $product->stock;
+                    $product->decrement('stock', 1);
+                    $product->refresh();
+                    $remainingStock = $product->stock;
 
-                        $totalPrice = $product->price * 1;
-                        Order::create([
-                            'product_id'  => $product->id,
-                            'user_id'     => 1,             
-                            'total_price' => $totalPrice,   
-                            'status'      => 'completed'
-                        ]);
+                    Order::create([
+                        'product_id'  => $product->id,
+                        'user_id'     => 1,             
+                        'total_price' => $product->price * 1,   
+                        'status'      => 'completed'
+                    ]);
 
                     return true; 
-            });
+                });
 
-            if (!$purchaseResult) {
-                Cache::put('product_stock_' . $productId, 0, 86400);
+                if (!$purchaseResult) {
+                    Cache::put('product_stock_' . $productId, 0, 60);
+                    return response()->json([
+                        'status' => 'rejected',
+                        'message' => 'Out of stock / Request Blocked'
+                    ], 422);
+                }
 
-                return response()->json([
-                    'status' => 'rejected',
-                    'message' => 'Out of stock / Request Blocked'
-                ], 422);
-            }
-
-            Cache::put('product_stock_' . $productId, $remainingStock, 86400);
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Purchase complete safely with Redis Distributed Lock!',
-                'remaining_stock' => $remainingStock
-            ]);
-
-        } finally {
-            $lock->release();
-        }
-        }
-        return response()->json([
-        'status' => 'rejected',
-        'message' => 'System Busy / Request Blocked by Redis Distributed Lock'
-         ], 423);
-        }
-
-
-
-    public function purchaseWithoutLock(Request $request)
-        {
-            $productId = $request->input('product_id', 1);
-            $product = Product::find($productId);
-
-            if (!$product || $product->stock <= 0) {
-                return response()->json([
-                'status' => 'rejected',
-                'message' => 'Out of stock / Request Blocked (Traditional Check)'
-                    ],
-                 422);
-                 }
-
-                $product->decrement('stock', 1);
-
-                Order::create([
-                    'product_id'  => $product->id,
-                    'user_id'     => 1,             
-                    'total_price' => $product->price,   
-                    'status'      => 'completed'
-                ]);
+                Cache::put('product_stock_' . $productId, $remainingStock, 60);
 
                 return response()->json([
                     'status' => 'success',
-                    'message' => 'Purchase processed WITHOUT LOCK!',
-                    'remaining_stock' => $product->stock - 1
+                    'message' => 'Purchase complete safely with Redis Distributed Lock!',
+                    'remaining_stock' => $remainingStock
                 ]);
+
+            } finally {
+                $lock->release();
+            }
         }
+
+        return response()->json([
+            'status' => 'rejected',
+            'message' => 'System Busy / Request Blocked by Redis Distributed Lock'
+        ], 423);
+    }
+
+
+    public function purchaseWithoutLock(Request $request)
+    {
+        $productId = $request->input('product_id', 1);
+        $product = Product::find($productId);
+
+        if (!$product || $product->stock <= 0) {
+            return response()->json([
+                'status' => 'rejected',
+                'message' => 'Out of stock / Request Blocked (Traditional Check)'
+            ], 422);
+        }
+
+        $currentStock = $product->stock; 
+        $product->stock = $currentStock - 1;
+        $product->save(); 
+
+        Order::create([
+            'product_id'  => $product->id,
+            'user_id'     => 1,             
+            'total_price' => $product->price,   
+            'status'      => 'completed'
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Purchase processed WITHOUT LOCK!',
+            'remaining_stock' => $product->stock // ستشاهد العجب هنا!
+        ]);
+       }
 }
