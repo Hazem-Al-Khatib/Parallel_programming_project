@@ -33,7 +33,8 @@ class OrderController extends Controller
                 ], 400);
             }
         }
-
+        
+        # Task 1 
         return DB::transaction(function () use ($productId, $quantityToBuy, $redisStockKey) {
             
         $product = Product::where('id', $productId)->lockForUpdate()->first();
@@ -55,7 +56,7 @@ class OrderController extends Controller
                     ]
                 ], 400);
             }
-
+            
             $product->stock -= $quantityToBuy;
             $product->save();
 
@@ -66,7 +67,7 @@ class OrderController extends Controller
                 'total_price' => $product->price * $quantityToBuy,
                 'status' => 'completed'
             ]);
-
+            
             OrderItem::create([
                 'order_id' => $order->id,
                 'product_id' => $product->id,

@@ -12,17 +12,14 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         
-        // 1️⃣ استثناء مسارات الفحص من الـ CSRF لكي تنجح طلبات الـ POST القادمة من PowerShell
         $middleware->validateCsrfTokens(except: [
             'purchase-distributed-lock',
             '/buy', 
             'purchase-without-lock',
         ]);
 
-        // 2️⃣ تفعيل ميدل وير الـ AOP بشكل عالمي (Global) لقياس أداء أي Request يدخل النظام
         $middleware->append(\App\Http\Middleware\AopPerformanceMiddleware::class);
 
-        // 3️⃣ تسجيل الأسماء المستعارة (Aliases) للميدل ويرز الأخرى لاستخدامها في الـ Routes
         $middleware->alias([
             'load.balancer' => \App\Http\Middleware\LoadBalancerMiddleware::class,
         ]);
