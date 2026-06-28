@@ -186,7 +186,7 @@ class OrderController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'Purchase processed WITHOUT LOCK!',
-            'remaining_stock' => $product->stock // ستشاهد العجب هنا!
+            'remaining_stock' => $product->stock 
         ]);
        }
 }
